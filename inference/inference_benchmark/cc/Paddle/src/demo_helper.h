@@ -27,6 +27,9 @@
 #include "glog/logging.h"
 
 #include "paddle/include/paddle_inference_api.h"
+#include "paddle/include/paddle_mkldnn_quantizer_config.h"
+#include "paddle/include/paddle_api.h"
+
 
 DEFINE_string(model_path, "./mobilenetv1/model",
               "Directory of the infer model file.");
@@ -49,7 +52,9 @@ DEFINE_bool(use_trt, false, "use trt or not");
 DEFINE_bool(use_mkldnn_, false, "use mkldnn or not, \
             use_mkldnn is internal gflags will conflict, \
             named use_mkldnn_ instead");
-// DECLARE_bool(use_mkldnn);
+            
+DEFINE_bool(use_mkldnn_quant, false, "use mkldnn post training quantization or not");
+DEFINE_bool(use_bf16, false, "use mkldnn bfloat16 convertion or not");
 
 DEFINE_int32(thread_num, 1, "num of threads");
 DEFINE_int32(batch_size, 1, "batch size");
@@ -63,6 +68,78 @@ std::map<std::string, paddle_infer::PrecisionType> trt_precision_map ={
   {"fp16", paddle_infer::PrecisionType::kHalf},
   {"int8", paddle_infer::PrecisionType::kInt8},
 };
+
+
+static void split(const std::string &str, const char *sep,
+                  std::vector<std::string> *pieces, bool ignore_null = true) {
+  pieces->clear();
+  if (str.empty()) {
+    if (!ignore_null) {
+      pieces->push_back(str);
+    }
+    return;
+  }
+  size_t pos = 0;
+  size_t next = str.find(sep, pos);
+  while (next != std::string::npos) {
+    pieces->push_back(str.substr(pos, next - pos));
+    pos = next + 1;
+    next = str.find(sep, pos);
+  }
+  if (!str.substr(pos).empty()) {
+    pieces->push_back(str.substr(pos));
+  }
+}
+
+
+std::shared_ptr<std::vector<paddle::PaddleTensor>> WarmupData(){
+  std::vector<std::string> shape_strs;
+  split(FLAGS_image_shape, ",", &shape_strs);
+  // int channels = 3;
+  int channels = static_cast<int>(std::stoi(shape_strs[0]));
+  // int height = 224;
+  int height = static_cast<int>(std::stoi(shape_strs[1]));
+  // int width = 224;
+  int width = static_cast<int>(std::stoi(shape_strs[2]));
+
+  int batch_size = FLAGS_batch_size;  // int batch_size = 1;
+  int input_num = channels * height * width * batch_size;
+  LOG(INFO) << "batch_size: " << batch_size << "\t," \
+            << "channels: " << channels << "\t," \
+            << "height: " << height << "\t," \
+            << "width: " << width;
+
+  paddle::PaddleTensor images;
+  images.name = "image";
+  images.shape = {batch_size, channels, height, width};
+  images.dtype = paddle_infer::DataType::FLOAT32;
+  images.data.Resize(sizeof(float) * input_num);
+
+  // prepare inputs
+  std::vector<float> in_data(input_num);
+  for (int i=0; i < input_num; ++i) {
+    in_data[i] = i % 10 * 0.1;
+  }
+
+  std::copy_n(in_data.begin(), input_num, static_cast<float *>(images.data.data()));
+  //std::copy_n(in_data.begin(), input_num, static_cast<float *>(images.data.data() + input_num));
+ 
+  auto warmup_data = std::make_shared<std::vector<paddle::PaddleTensor>>(1);
+  (*warmup_data)[0] = std::move(images);
+  printf("IN warmup data \n");
+  //for (int i=0; i<input_num; i++){
+  //  float* result = static_cast<float*>(warmup_data.get()[0][0].data.data());
+  //auto result = static_cast<float *>(images.data.data())[0];
+ //   for (int i=0; i< 10; i++){
+ //   printf("%f ", *((result+i)));
+ //   }
+  //}
+
+  printf("\n ");
+  return warmup_data;
+}
+
+
 
 void PrepareConfig(paddle_infer::Config *config) {
   // prepare Paddle-Inference Config
@@ -90,7 +167,7 @@ void PrepareConfig(paddle_infer::Config *config) {
     config->SetCpuMathLibraryNumThreads(FLAGS_cpu_math_library_num_threads);
     if (FLAGS_use_mkldnn_) {
       config->EnableMKLDNN();
-      LOG(INFO) << "mkldnn enabled";
+      printf( "mkldnn enabled");
     }
   }
   config->EnableMemoryOptim();
@@ -151,28 +228,6 @@ void SummaryConfig(paddle_infer::Config *config,
   LOG(INFO) << "Average latency(ms): " << infer_time / FLAGS_repeats << ", " \
             << "QPS: " << (FLAGS_repeats * FLAGS_batch_size)/ (infer_time/1000);
 }
-
-static void split(const std::string &str, const char *sep,
-                  std::vector<std::string> *pieces, bool ignore_null = true) {
-  pieces->clear();
-  if (str.empty()) {
-    if (!ignore_null) {
-      pieces->push_back(str);
-    }
-    return;
-  }
-  size_t pos = 0;
-  size_t next = str.find(sep, pos);
-  while (next != std::string::npos) {
-    pieces->push_back(str.substr(pos, next - pos));
-    pos = next + 1;
-    next = str.find(sep, pos);
-  }
-  if (!str.substr(pos).empty()) {
-    pieces->push_back(str.substr(pos));
-  }
-}
-
 
 void LoadBinaryData(const char *binary_file_name, 
                     std::vector<float> *in_data,

@@ -23,34 +23,6 @@ if [ $# -ge 2 ]; then
     device_type=$2
 fi
 
-mkdir -p $DATA_ROOT
-cd $DATA_ROOT
-if [ ! -f PaddleClas/infer_static/AlexNet/__model__ ]; then
-    echo "==== Download PaddleClas data and models ===="
-    wget --no-proxy -q https://sys-p0.bj.bcebos.com/Paddle-UnitTest-Model/PaddleClas.tgz --no-check-certificate
-    tar -zxf PaddleClas.tgz
-fi
-
-if [ ! -f PaddleDetection/infer_static/yolov3_darknet/__model__ ]; then
-    echo "==== Download PaddleDetection data and models ===="
-    wget --no-proxy -q https://sys-p0.bj.bcebos.com/Paddle-UnitTest-Model/PaddleDetection.tgz --no-check-certificate
-    tar -zxf PaddleDetection.tgz
-fi
-
-if [ ! -f PaddleOCR/ch_ppocr_mobile_v1.1_cls_infer/model ]; then
-    echo "==== Download PaddleOCR data and models ===="
-    wget --no-proxy -q https://sys-p0.bj.bcebos.com/Paddle-UnitTest-Model/PaddleOCR.tgz --no-check-certificate
-    tar -zxf PaddleOCR.tgz
-fi
-
-if [ ! -f PaddleSeg/infer_static/deeplabv3p/__model__ ]; then
-    echo "==== Download PaddleSeg data and models ===="
-    wget --no-proxy -q https://sys-p0.bj.bcebos.com/Paddle-UnitTest-Model/PaddleSeg.tgz --no-check-certificate
-    tar -zxf PaddleSeg.tgz
-fi
-
-cd -
-
 mkdir -p $LOG_ROOT
 
 echo "==== run ${MODEL_TYPE} model benchmark ===="
@@ -66,7 +38,7 @@ if [ "${MODEL_TYPE}" == "static" ]; then
         export KMP_BLOCKTIME=1
         # no_turbo 1 means turning off turbo, it was set to save power. no_turbo 0 means turning on turbo which will improve some performance
         # echo 1 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
-
+        echo "==== CPU ===="
         default_cpu_batch_size=(1 2 4)
         cpu_batch_size=${3:-${default_cpu_batch_size[@]}}
         default_cpu_num_threads=(1 2 4)
@@ -78,5 +50,3 @@ elif [ "${MODEL_TYPE}" == "dy2static" ]; then
     bash $CASE_ROOT/run_clas_gpu_trt_benchmark.sh "${DATA_ROOT}/PaddleClas/infer_dygraph"
     # bash $CASE_ROOT/run_dy2staic_det_gpu_trt_benchmark.sh
 fi
-
-

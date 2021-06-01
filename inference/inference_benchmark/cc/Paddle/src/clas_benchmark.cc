@@ -45,6 +45,8 @@ double Inference(Predictor* pred, int tid) {
     in_data[i] = i % 10 * 0.1;
   }
 
+
+
   // set inputs
   auto in_names = pred->GetInputNames();
   auto input_t = pred->GetInputHandle(in_names[0]);
@@ -97,15 +99,31 @@ double Inference(Predictor* pred, int tid) {
 void RunDemo() {
   Config config;
   PrepareConfig(&config);
+  bool use_mkldnn_quant = false;
+  bool use_bf16 = true;
+  //config.SwitchIrDebug();
+  //config.EnableMKLDNN();
+  if (use_mkldnn_quant){
+    config.EnableMKLDNN();
+    auto warmup_data = WarmupData();
+    config.EnableMkldnnQuantizer();
+    config.mkldnn_quantizer_config()->SetWarmupData(warmup_data);
+    config.mkldnn_quantizer_config()->SetWarmupBatchSize(
+        FLAGS_batch_size);
+  } else if(use_bf16){
+    config.pass_builder()->AppendPass("fc_lstm_fuse_pass");
+    config.EnableMKLDNN();
+    config.EnableMkldnnBfloat16();
+  }
 
   services::PredictorPool pred_pool(config, FLAGS_thread_num);
-
   if (FLAGS_model_name == "ch_ppocr_mobile_v1.1_rec_infer"){
-    LOG(INFO) << "run ch_ppocr_mobile_v1.1_rec_infer model";
+    LOG(INFO) << "run int64_t";
     auto total_time = Inference<int64_t>(pred_pool.Retrive(0), 0);
     SummaryConfig(&config, total_time);
   } else {
-    auto total_time = Inference(pred_pool.Retrive(0), 0);
+    LOG(INFO) << "run float";
+    auto total_time = Inference<int64_t>(pred_pool.Retrive(0), 0);
     SummaryConfig(&config, total_time);
   }
 }
